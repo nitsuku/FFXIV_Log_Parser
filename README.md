@@ -1,4 +1,4 @@
-<h1 align="center">FFXIV Prog Charter</h1>
+<h1 align="center">FFXIV Prog Parser and Charting Application</h1>
 <h2 align="center">A Program Which Allows You To Graph Your Ultimate Progress</h2>
 ## Install
 
@@ -13,7 +13,7 @@ python3 Log_Parser.py
 ## Usage
 
 ```sh
-usage: Log_Parser.py
+usage: python3 Log_Parser.py
 ```
 
 ## Author

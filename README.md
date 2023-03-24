@@ -1,1 +1,0 @@
-# FFXIV_Log_Parser

@@ -29,8 +29,8 @@ import warnings
 ###         c) python .\Log_To_GIF.py "TEA" "C:\\Users\\user\\Desktop\\tests\\Tea_group2" "gm"
 ###         d) python .\Log_To_GIF.py "UCoB" "C:\\Users\\user\\Desktop\\tests\\ucob"
 #############
-fightlist = "TEA,UWU,UCoB,DSU,P4S,P3S,P2S,P1S,E9S,E10S,E11S,E12S,P5S,P6S,P7S,P8S"
-fightarray = ["TEA","UWU","UCoB","DSU","P4S","P3S","P2S","P1S","E9S","E10S","E11S","E12S","P5S","P6S","P7S","P8S"]
+fightlist = "TEA,UWU,UCoB,DSU"#,P4S,P3S,P2S,P1S,E9S,E10S,E11S,E12S,P5S,P6S,P7S,P8S"
+fightarray = ["TEA","UWU","UCoB","DSU"#,"P4S","P3S","P2S","P1S","E9S","E10S","E11S","E12S","P5S","P6S","P7S","P8S"]
 minFrameDuration = 0.02 #animation stuff
 rampUpTime = 5 #animation stuff
 rampDownTime = 2 #animation stuff

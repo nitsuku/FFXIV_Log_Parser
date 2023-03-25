@@ -1,5 +1,6 @@
 <h1 align="center">FFXIV Prog Parser and Charting Application</h1>
 <h2 align="center">A Program Which Allows You To Graph Your Ultimate Progress</h2>
+
 ## Install
 
 ```sh

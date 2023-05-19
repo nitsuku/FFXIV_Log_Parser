@@ -1,3 +1,4 @@
+import threading
 import re
 import datetime
 import os
@@ -8,49 +9,290 @@ from sortedcontainers import SortedDict
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import imageio
-import warnings
+import glob
+from shutil import copyfile, copy2, rmtree
 
-#############
-###   To use this script, use powershell and the following commands
-###   You will need the following installed:     Python3
-###   You will need to install the following packages with the commands included from a powershell window: 
-###             pip install re
-###             pip install datetime
-###             pip install os
-###             pip install sys
-###             pip install SortedDict
-###             pip install matplotlib
-###             pip install imageio
-###       1) CD to a working directory
-###         a) cd C:\Users\user\Desktop\tests\FFXIVLogParser-main
-###       2) python .\Log_To_GIF.py "FIGHT_NAME" "LOG_FOLDER_NAME"
-###         a) python .\Log_To_GIF.py "UWU" "C:\\Users\\user\\AppData\\Roaming\\Advanced Combat Tracker\\FFXIVLogs"
-###         b) python .\Log_To_GIF.py "TEA" "C:\\Users\\user\\Desktop\\tests\\ztea"
-###         c) python .\Log_To_GIF.py "TEA" "C:\\Users\\user\\Desktop\\tests\\Tea_group2" "gm"
-###         d) python .\Log_To_GIF.py "UCoB" "C:\\Users\\user\\Desktop\\tests\\ucob"
-#############
-fightlist = "TEA,UWU,UCoB,DSU"#,P4S,P3S,P2S,P1S,E9S,E10S,E11S,E12S,P5S,P6S,P7S,P8S"
-fightarray = ["TEA","UWU","UCoB","DSU"#,"P4S","P3S","P2S","P1S","E9S","E10S","E11S","E12S","P5S","P6S","P7S","P8S"]
+status = ""
+statuscolor = "white"
+working = False
 minFrameDuration = 0.02 #animation stuff
 rampUpTime = 5 #animation stuff
 rampDownTime = 2 #animation stuff
 gifTime = 15 #animation stuff
-status = "" ## user update line.
 check = False ## was there a checkpoint?
 flip = True ## silly logic solver, this is prob a wasted method.
 animation = "" ##Do you want a gif or mp4?
 fd = True ##First death trigger
 phaseClears = [] ##Track the clear time of each phase and calc the averages later.
-wipeRegExp = ""
-clearRegExp = "" 
-startRegExp = ""
-logfolder = ""
+
 ###########
-## List of all fights that I have supported via the timeline and phases
-##     FightID is scraped from logs manually and added here.
-##     Fight name/list will need to be updated above as new content is added here.
+## Called function to check if the arena was just entered or if the
+##     fight has a doorboss. If a doorboss is listed (doorquote check)
+##     then  returns a value accordingly via check.
 ###########
-def fightSelect(fightName, logLoc, loop) :
+def doorbossDown(fightID, line):
+	global check
+	check = False
+	if (fightID == "8003759C"): #p4s
+		doorquote = "Hesperos|Do not believe victory yours... I can yet shed this"
+		enterquote = "Asphodelos: The Fourth Circle (Savage) has begun"
+		if(doorquote.lower() in line.lower()):
+			check = True
+		elif(enterquote.lower() in line.lower()):
+			check = False
+	elif (fightID == "8003759A"): #dsr
+		enterquote = "Dragonsong's Reprise (Ultimate) has begun."
+		doorquote = "In pursuit of the archbishop, the Warrior of Light journeyed to Azys"
+		if(doorquote.lower() in line.lower()):
+			check = True
+		elif(enterquote.lower() in line.lower()):
+			check = False
+	elif (fightID == "p12s"): #p12s
+		doorquote = "Do not believe victory yours... I can yet shed this"
+	elif (fightID == "p8s"):
+		doorquote = "Do not believe victory yours... I can yet shed this"
+	elif (fightID == "e12s"):
+		doorquote = "Do not believe victory yours... I can yet shed this"
+	elif (fightID == "idk"):
+		doorquote = "Do not believe victory yours... I can yet shed this"
+	elif (fightID == "somethingeventually"):
+		doorquote = "Do not believe victory yours... I can yet shed this"
+	else:
+		check = False
+	return check
+
+###########
+## Parses the log files themselves line by line here
+##     Logfile is passed from parseFolder, and dict is an empty collection that is returned.
+##     Comments throughout the function for readability since it is long.
+###########
+def parseLog(logFile, dict):
+	with open(logFile, 'r', encoding="utf8") as logSource:
+		startTime = datetime.datetime(9999,12,31) #ignore me, bound setting
+		endTime = datetime.datetime(1,1,1) #ignore me, bound setting
+		clear = False #did you clear the fight?
+		doorbossdead = False #did the doorboss get taken down?
+		firstClear = True #first clear tracker
+		global fd
+        ####
+        ##  Check each line for a fight start trigger, wipe trigger,
+        ##    or clear trigger.
+        ####
+		for i, line in enumerate(logSource):
+			startMatch = startRegExp.match(line)
+			if startMatch:
+				startTime = datetime.datetime(int(startMatch.group(1)),int(startMatch.group(2)),int(startMatch.group(3)),int(startMatch.group(4)),int(startMatch.group(5)),int(startMatch.group(6)))
+				fd = True;
+			else:
+				wipeMatch = wipeRegExp.match(line)
+				if wipeMatch:
+					endTime = datetime.datetime(int(wipeMatch.group(1)),int(wipeMatch.group(2)),int(wipeMatch.group(3)),int(wipeMatch.group(4)),int(wipeMatch.group(5)),int(wipeMatch.group(6)))
+					clear = False
+				else:
+					clearMatch = clearRegExp.match(line)
+					if clearMatch:
+						endTime = datetime.datetime(int(clearMatch.group(1)),int(clearMatch.group(2)),int(clearMatch.group(3)),int(clearMatch.group(4)),int(clearMatch.group(5)),int(clearMatch.group(6)))
+						clear = True
+
+            ## Did the door boss die here?
+			doorbossdead = doorbossDown(fightID, line)
+
+            ##If doorboss just died, dont scuff the timer since it is through the phase anyway.
+			if line.find("In pursuit of the archbishop") != -1:#literally just for DSR. Forgiveness trigger for doorboss kill.
+				fd = False
+			if check: #If the checkpoint was hit, firstClear flips its value
+				firstClear = not firstClear
+			else: #room reset, default our firstClear
+				firstClear=True
+			if endTime > startTime: #If valid log time, fill the dict with data!
+				duration = (endTime-startTime).total_seconds()/60
+				if(doorbossdead): #if doorboss was defeated, add phase0 time to the counter.
+					if (not fd):
+						dict[startTime] = (duration+.5,clear,doorbossdead,firstClear) #may need to increase .5 if our dps gets any stronger in this phase or everyone pots.
+					#	addToPhaseTracker(getPhase(duration+.5), duration+.5)
+					else:
+						dict[startTime] = (duration+phases[0],clear,doorbossdead,firstClear)
+					#	addToPhaseTracker(getPhase(duration+phases[0]), duration+phases[0])
+				else: #otherwise add normal time counting.
+					dict[startTime] = (duration,clear,doorbossdead,firstClear)
+					#addToPhaseTracker(getPhase(duration), duration)
+				startTime = datetime.datetime(9999,12,31)
+				endTime = datetime.datetime(1,1,1)
+
+
+###########
+## Get the current phase of the fight
+###########
+def getPhase(time):
+	for i in range(len(phases)):
+		if time < phases[i]:
+			return i
+	return 0
+ 
+
+def parseFolder(daynum=None):
+	dict = SortedDict() #will store fight data for each pull/event.
+	global animation #var checking if you want a gif or mp4
+	global flip #shit var that I now need.
+	global status, statuscolor
+	status = "Parsing Loggies!"
+	flip = True #ihateyou.gif
+	i = 1
+	totalFiles = len(os.listdir(logFolder))
+	for filename in os.listdir(logFolder):#Lets parse some loggies!
+		print(f'File %i of {totalFiles}' % i, end="\r")
+		status = (f'Parsing %i of {totalFiles} logs. Please wait.' % i)
+		statuscolor = "Blue"
+		i += 1
+		parseLog(logFolder+"\\"+filename,dict)
+	plt.switch_backend('agg')
+	plt.xlabel("Pull #")
+	plt.ylabel("Duration (min)")
+	plt.figure(figsize=(16,9.12))#chart size I use.
+	adjustedPhases = [0] + phases
+    ##Set the background
+	for iPhase in range(len(phases)):
+		plt.axhspan(adjustedPhases[iPhase], adjustedPhases[iPhase+1], facecolor=phaseColors[iPhase], alpha=0.1)
+	filenames = []
+	t = datetime.timedelta()
+	a = datetime.timedelta()
+
+	wipecount = []
+	wipecount = [0 for i in range(7)]
+	## Setting up gif duration bits here.
+	rampUpIdx = len(dict)
+	rampDownIdx = 0
+	#frameDuration = gifTime/len(dict)
+	try:
+		frameDuration = gifTime / len(dict)
+	except ZeroDivisionError:
+		status = "No fight match found."
+		statuscolor = "red"
+		return
+	frameStep = 1
+	if frameDuration < minFrameDuration:
+		frameDuration = minFrameDuration
+		rampUpIdx = rampUpTime/frameDuration
+		rampDownIdx = rampDownTime/frameDuration
+		frameStep = (len(dict) - rampUpIdx - rampDownIdx) / ((gifTime - rampUpTime - rampDownTime) / frameDuration)
+	status = "Creating PNG graphs!              "
+	statuscolor = "White"
+	#print(f'%s ' % status, end ="\r")		
+    ####
+    ## This iterates through the entire dict of data and will create a png frame for each pull (wipe or clear)
+    ####
+	
+	for j in range(len(dict)):
+		# Dot plotting
+		phaseNum = getPhase(dict.peekitem(j)[1][0])
+		if dict.peekitem(j)[1][1]: #if the pull is a clear, plot a star on the chart
+			if (dict.peekitem(j)[1][2]): #Did the fight have a doorboss already killed?
+				plt.plot(j, dict.peekitem(j)[1][0], color='yellow', marker='*', markeredgecolor='gray', markersize=10)
+			elif not (dict.peekitem(j)[1][2]):
+				plt.plot(j, dict.peekitem(j)[1][0], color='yellow', marker='*', markeredgecolor='gray', markersize=10)
+		else: #if the pull was not a clear, mark with a blue dot.
+			#plt.plot(j, dict.peekitem(j)[1][0], color=phaseColors[phaseNum], marker='o', markersize=5)##Use phase colors for dots. Not sure if i want to add other color options here.
+			plt.plot(j, dict.peekitem(j)[1][0], color='blue', marker='o', markersize=5) ##just blue dots
+		if (dict.peekitem(j)[1][2]):
+			t += datetime.timedelta(seconds=(int(dict.peekitem(j)[1][0]-int(float(phases[0])))*60)) ## Double check me
+		else:
+			t += datetime.timedelta(seconds=int(dict.peekitem(j)[1][0]*60))
+
+		a = t/(j+1)
+		a = str(a) #average pull time for prog trackin!:D
+		if re.search("^[0-9]*:",a) is True :
+			a = a[:8]
+		else :
+			a = a[:7]
+		plt.title(f"{fightTitle} prog : {j+1} pulls ({t} combat time)   (Average pull time: {a})")
+		
+		# Legend
+		patches = []
+		counted = False
+        ## Make the legend for each frame. I'm sorry about the logic here
+		# for iPatch in range(len(phases)):
+			# if(flip and not dict.peekitem(j)[1][3]):
+				# flip = False #If flip is true, firstClear is just triggered. Swap it.
+			# elif (not flip and dict.peekitem(j)[1][3]):
+				# flip = True #if firstClear is not triggered, flip needs to be re-enabled.
+			# if(not flip and not dict.peekitem(j)[1][3]):
+				# iPatch = iPatch+1 #if flip and firstClear are triggered, you need to add to the next phase.
+			# if (not counted and dict.peekitem(j)[1][0] < phases[iPatch]): #finally we can do something here
+				# counted = True #this patch is being processes
+				# if (dict.peekitem(j)[1][2]): #doorbossdead 
+					# if (dict.peekitem(j)[1][3]): #firstClear
+						# wipecount[iPatch] += 1 
+					# else: #not firstClear
+						# wipecount[iPatch] += 1
+				# else: #No doorbossdead, act normal <_<   >_>
+					# wipecount[iPatch] += 1
+			# if(not flip and not dict.peekitem(j)[1][3]):
+				# iPatch = iPatch-1 #undo our modification here so logic flows normal.
+
+			# patches += [mpatches.Patch(color=phaseColors[iPatch], label=(phaseNames[iPatch]) + f": {wipecount[iPatch]}")]
+		for iPatch in range(len(phases)):
+			item = dict.peekitem(j)[1]
+			firstClear = item[3]
+    
+			if flip != firstClear:
+				flip = firstClear
+				if not firstClear:
+					iPatch += 1
+			elif not counted and item[0] < phases[iPatch]:
+				counted = True
+				if item[2]:  # doorbossdead
+					wipecount[iPatch] += 1
+				else:
+					wipecount[iPatch] += 1
+			if not flip and not firstClear:
+				iPatch -= 1
+    
+			patches.append(mpatches.Patch(color=phaseColors[iPatch], label=phaseNames[iPatch] + f": {wipecount[iPatch]}"))
+
+		plt.legend(handles=patches, loc="upper left")
+		
+		# create file name and append it to a list
+		if j < rampUpIdx or j > (len(dict) - rampDownIdx) or (j - rampUpIdx)%int(frameStep) == 0:
+			filename = f'{j}.png'
+			filenames.append(filename)
+			# save frame
+			plt.savefig(filename)
+		
+	# build gif
+    ##just let this be, it will give you an aspect warning, but every solution I try
+    ##  to throw in causes a different one. This way works fine, ignore the warning.
+	now = datetime.datetime.now()
+	name =" {}-{}".format(now.month, now.day)
+	gifname=name+"_summary.gif"
+	mp4name=name+"_summary.mp4"
+	if (animation.find("g") != -1): ##make gif
+		status = "Assembling GIF. Please wait.      "
+		statuscolor="Blue"
+		#print(f'%s ' % status, end ="\r")
+		with imageio.get_writer(gifname, format='GIF-PIL', mode='I', loop = 1, duration=frameDuration, subrectangles=True) as writer:
+			for filename in filenames:
+				image = imageio.imread(filename)
+				writer.append_data(image)
+	if (animation.find("m") != -1): ##make mp4
+		status = "Assembling mp4. Please wait.      "
+		statuscolor="Blue"
+		#print(f'%s ' % status, end ="\r")
+		with imageio.get_writer(mp4name, fps=30) as writer2: #30 seems fine, right?
+			for filename in filenames:
+				image = imageio.imread(filename)
+				writer2.append_data(image)
+	status = "Cleaning  up files                "
+	#print(f'%s ' % status, end ="\r")
+	for filename in set(filenames[:-1]):##leave the last image so you have a png too!
+		os.remove(filename)
+	if daynum:
+		os.rename(filenames[len(filenames)-1],("day"+daynum+".png"))
+	#print("Gif, MP4 and PNG complete! All done!")
+	status = "Graphs complete! Check the folder for results"
+	statuscolor = "lightgreen"
+	return 
+    
+def fightSelect(fightName, logLoc) :#, loop) :
     global fightTitle
     fightTitle = fightName
     global logFolder
@@ -60,9 +302,11 @@ def fightSelect(fightName, logLoc, loop) :
     global phases
     global phaseNames
     global transitions
+    global working
+    global status, statuscolor
     status = "Parsing logs for " + str(fightName)
-    loop.run_until_complete(statusUpdate(status, color="white"))##TEST
-    print("Parsing logs for " + fightName)
+    statuscolor = "White"
+    working = True
     if (fightName == "TEA"):
         fightID = "80037586"
         phaseColors = ['b','r','y','g']
@@ -82,7 +326,6 @@ def fightSelect(fightName, logLoc, loop) :
         fightID = "8003759A"##UPDATE ME
         phaseColors = ['b','r','y','c','b','r','gold']
         phases = [2.9,6.3,8.4,10.8,13.8,16.8,21.2]
-#        phases = [3.32,6.8,8.3,10.5,13,15.7,19.9]
         phaseNames = ["Adelphel","Thordan","Nidhogg","Eyes","Thordan2","NidhoggHrae","DragonKing"]
         transitions = ["of the archbishop", "defeats King Thordan", "defeats Nidhogg", "undone by mortal", "defeats King Thordan", "defeats y", "\|40000003"]
     elif (fightName == "P4S"):
@@ -149,453 +392,248 @@ def fightSelect(fightName, logLoc, loop) :
         print("Invalid fight name entered. Please include the fight name in quotes.")
         print(f"Supported fight names are: {fightlist}")
         sys.exit()
-
-
-###########
-## Parses the log files themselves line by line here
-##     Logfile is passed from parseFolder, and dict is an empty collection that is returned.
-##     Comments throughout the function for readability since it is long.
-###########
-def parseLog(logFile, dict):
-	with open(logFile, 'r', encoding="utf8") as logSource:
-		startTime = datetime.datetime(9999,12,31) #ignore me, bound setting
-		endTime = datetime.datetime(1,1,1) #ignore me, bound setting
-		clear = False #did you clear the fight?
-		doorbossdead = False #did the doorboss get taken down?
-		firstClear = True #first clear tracker
-		global fd
-        ####
-        ##  Check each line for a fight start trigger, wipe trigger,
-        ##    or clear trigger.
-        ####
-		for i, line in enumerate(logSource):
-			startMatch = startRegExp.match(line)
-			if startMatch:
-				startTime = datetime.datetime(int(startMatch.group(1)),int(startMatch.group(2)),int(startMatch.group(3)),int(startMatch.group(4)),int(startMatch.group(5)),int(startMatch.group(6)))
-				fd = True;
-			else:
-				wipeMatch = wipeRegExp.match(line)
-				if wipeMatch:
-					endTime = datetime.datetime(int(wipeMatch.group(1)),int(wipeMatch.group(2)),int(wipeMatch.group(3)),int(wipeMatch.group(4)),int(wipeMatch.group(5)),int(wipeMatch.group(6)))
-					clear = False
-				else:
-					clearMatch = clearRegExp.match(line)
-					if clearMatch:
-						endTime = datetime.datetime(int(clearMatch.group(1)),int(clearMatch.group(2)),int(clearMatch.group(3)),int(clearMatch.group(4)),int(clearMatch.group(5)),int(clearMatch.group(6)))
-						clear = True
-
-
-
-            ## Did the door boss die here?
-			doorbossdead = doorbossDown(fightID, line)
-
-            ##If doorboss just died, dont scuff the timer since it is through the phase anyway.
-			if line.find("In pursuit of the archbishop") != -1:#literally just for DSR. Forgiveness trigger for doorboss kill.
-				fd = False
-			if check: #If the checkpoint was hit, firstClear flips its value
-				firstClear = not firstClear
-			else: #room reset, default our firstClear
-				firstClear=True
-			if endTime > startTime: #If valid log time, fill the dict with data!
-				duration = (endTime-startTime).total_seconds()/60
-				if(doorbossdead): #if doorboss was defeated, add phase0 time to the counter.
-					if (not fd):
-						dict[startTime] = (duration+.5,clear,doorbossdead,firstClear) #may need to increase .5 if our dps gets any stronger in this phase or everyone pots.
-					#	addToPhaseTracker(getPhase(duration+.5), duration+.5)
-					else:
-						dict[startTime] = (duration+phases[0],clear,doorbossdead,firstClear)
-					#	addToPhaseTracker(getPhase(duration+phases[0]), duration+phases[0])
-				else: #otherwise add normal time counting.
-					dict[startTime] = (duration,clear,doorbossdead,firstClear)
-					#addToPhaseTracker(getPhase(duration), duration)
-				startTime = datetime.datetime(9999,12,31)
-				endTime = datetime.datetime(1,1,1)
-
-###########
-## This will check if the line matches a DSR transition.
-##   This data will be used to calculate phase averages.
-## Eventually I will finish this
-###########
-def setPhaseTracker():
-	global phaseClears
-	for i in range(len(phases)):
-		x = []
-		phaseClears.append(x)
-
-###########
-## This will check if the line matches a DSR transition.
-##   This data will be used to calculate phase averages.
-## Eventually I will finish this
-###########
-def addToPhaseTracker(line, duration):
-	global phaseClears
-	if (fightID == "8003759A"): #dsr
-		phaseClears[line].append(duration)
-		#for i in range(len(transitions)):
-			#print(str(transitions[i]) + "    " + str(duration))
-		#	if(str(transitions[i]).lower() in line.lower()):
-		#		#print(str(transitions[i]) + "  -  " + str(phases[i]) + "   ---   dur: " + str(duration)) 
-		#		phaseClears[i].append(duration)
-
-###########
-## Get the current phase of the fight
-###########
-def getPhase(time):
-	for i in range(len(phases)):
-		if time < phases[i]:
-			return i
-	return 0
- 
-
-###########
-## Called function to check if the arena was just entered or if the
-##     fight has a doorboss. If a doorboss is listed (doorquote check)
-##     then  returns a value accordingly via check.
-###########
-def doorbossDown(fightID, line):
-	global check
-	if (fightID == "8003759C"): #p4s
-		doorquote = "Hesperos|Do not believe victory yours... I can yet shed this"
-		enterquote = "Asphodelos: The Fourth Circle (Savage) has begun"
-		if(doorquote.lower() in line.lower()):
-			check = True
-		elif(enterquote.lower() in line.lower()):
-			check = False
-	elif (fightID == "8003759A"): #dsr
-		enterquote = "Dragonsong's Reprise (Ultimate) has begun."
-		doorquote = "In pursuit of the archbishop, the Warrior of Light journeyed to Azys"
-		if(doorquote.lower() in line.lower()):
-			check = True
-		elif(enterquote.lower() in line.lower()):
-			check = False
-	elif (fightID == "p12s"): #p12s
-		doorquote = "Do not believe victory yours... I can yet shed this"
-	elif (fightID == "p8s"):
-		doorquote = "Do not believe victory yours... I can yet shed this"
-	elif (fightID == "e12s"):
-		doorquote = "Do not believe victory yours... I can yet shed this"
-	elif (fightID == "idk"):
-		doorquote = "Do not believe victory yours... I can yet shed this"
-	elif (fightID == "somethingeventually"):
-		doorquote = "Do not believe victory yours... I can yet shed this"
-	else:
-		check = False
-	return check
-
-###########
-## First off, I'm sorry to whoever, myself included, is reading over the code here.
-##   This is the meat of the script, and it has become quite sloppily done.
-## Main function of the script. The descriptions will be broken down as we go.
-###########
-def parseFolder(loop, daynum=None):
-	dict = SortedDict() #will store fight data for each pull/event.
-	global animation #var checking if you want a gif or mp4
-	global flip #shit var that I now need.
-	global logfolder
-	warnings.filterwarnings("ignore")
-	flip = True #ihateyou.gif
-	i = 1
-	totalFiles = len(os.listdir(logFolder))
-	for filename in os.listdir(logFolder):#Lets parse some loggies!
-		print(f'File %i of {totalFiles}' % i, end="\r")
-		status = "Parsing file " + str(i) + " of " + str(totalFiles) + "."
-		loop.run_until_complete(statusUpdate(status, color="white"))##TEST
-		i += 1
-		parseLog(logFolder+"\\\\"+filename,dict)
-		if i == totalFiles+1:
-			status = "Creating PNG graphs!"
-			loop.run_until_complete(statusUpdate(status, color="white"))##TEST	
-	status = "Creating PNG graphs!"
-	print(f'%s ' % status, end ="\r")
-	loop.run_until_complete(statusUpdate(status, color="white"))##TEST
-
-
-	plt.xlabel("Pull #")
-	plt.ylabel("Duration (min)")
-	plt.figure(figsize=(16,9.12))#chart size I use.
-	adjustedPhases = [0] + phases
-    ##Set the background
-	for iPhase in range(len(phases)):
-		plt.axhspan(adjustedPhases[iPhase], adjustedPhases[iPhase+1], facecolor=phaseColors[iPhase], alpha=0.1)
-	filenames = []
-	t = datetime.timedelta()
-	a = datetime.timedelta()
-
-	wipecount = []
-	wipecount = [0 for i in range(7)]
-	## Setting up gif duration bits here.
-	rampUpIdx = len(dict)
-	rampDownIdx = 0
-	try: 
- 	   frameDuration = gifTime/len(dict)
-	except ZeroDivisionError:
- 	   status = "Fight not found in folder"
- 	   loop.run_until_complete(statusUpdate(status, color="red"))##TEST
- 	   return "0"
-	frameStep = 1
-
-	if frameDuration < minFrameDuration:
-		frameDuration = minFrameDuration
-		rampUpIdx = rampUpTime/frameDuration
-		rampDownIdx = rampDownTime/frameDuration
-		frameStep = (len(dict) - rampUpIdx - rampDownIdx) / ((gifTime - rampUpTime - rampDownTime) / frameDuration)
-		
-    ####
-    ## This iterates through the entire dict of data and will create a png frame for each pull (wipe or clear)
-    ####
-	
-	for j in range(len(dict)):
-		# Dot plotting
-		phaseNum = getPhase(dict.peekitem(j)[1][0])
-		if dict.peekitem(j)[1][1]: #if the pull is a clear, plot a star on the chart
-			if (dict.peekitem(j)[1][2]): #Did the fight have a doorboss already killed?
-				plt.plot(j, dict.peekitem(j)[1][0], color='yellow', marker='*', markeredgecolor='gray', markersize=10)
-			elif not (dict.peekitem(j)[1][2]):
-				plt.plot(j, dict.peekitem(j)[1][0], color='yellow', marker='*', markeredgecolor='gray', markersize=10)
-		else: #if the pull was not a clear, mark with a blue dot.
-			#plt.plot(j, dict.peekitem(j)[1][0], color=phaseColors[phaseNum], marker='o', markersize=5)##Use phase colors for dots. Not sure if i want to add other color options here.
-			plt.plot(j, dict.peekitem(j)[1][0], color='blue', marker='o', markersize=5) ##just blue dots
-		if (dict.peekitem(j)[1][2]):
-			t += datetime.timedelta(seconds=(int(dict.peekitem(j)[1][0]-int(float(phases[0])))*60)) ## Double check me
-		else:
-			t += datetime.timedelta(seconds=int(dict.peekitem(j)[1][0]*60))
-
-		a = t/(j+1)
-		a = str(a) #average pull time for prog trackin!:D
-		if re.search("^[0-9]*:",a) is True :
-			a = a[:8]
-		else :
-			a = a[:7]
-		plt.title(f"{fightTitle} prog : {j+1} pulls ({t} combat time)   (Average pull time: {a})")
-		
-		# Legend
-		patches = []
-		counted = False
-        ## Make the legend for each frame. I'm sorry about the logic here
-		for iPatch in range(len(phases)):
-			if(flip and not dict.peekitem(j)[1][3]):
-				flip = False #If flip is true, firstClear is just triggered. Swap it.
-			elif (not flip and dict.peekitem(j)[1][3]):
-				flip = True #if firstClear is not triggered, flip needs to be re-enabled.
-			if(not flip and not dict.peekitem(j)[1][3]):
-				iPatch = iPatch+1 #if flip and firstClear are triggered, you need to add to the next phase.
-			if (not counted and dict.peekitem(j)[1][0] < phases[iPatch]): #finally we can do something here
-				counted = True #this patch is being processes
-				if (dict.peekitem(j)[1][2]): #doorbossdead 
-					if (dict.peekitem(j)[1][3]): #firstClear
-						wipecount[iPatch] += 1 
-					else: #not firstClear
-						wipecount[iPatch] += 1
-				else: #No doorbossdead, act normal <_<   >_>
-					wipecount[iPatch] += 1
-			if(not flip and not dict.peekitem(j)[1][3]):
-				iPatch = iPatch-1 #undo our modification here so logic flows normal.
-
-			patches += [mpatches.Patch(color=phaseColors[iPatch], label=(phaseNames[iPatch]) + f": {wipecount[iPatch]}")]
-		plt.legend(handles=patches, loc="upper left")
-		
-		# create file name and append it to a list
-		if j < rampUpIdx or j > (len(dict) - rampDownIdx) or (j - rampUpIdx)%int(frameStep) == 0:
-			filename = f'{j}.png'
-			filenames.append(filename)
-			# save frame
-			plt.savefig(filename)
-		
-	# build gif
-    ##just let this be, it will give you an aspect warning, but every solution I try
-    ##  to throw in causes a different one. This way works fine, ignore the warning.
-	now = datetime.datetime.now()
-	name =" {}-{}".format(now.month, now.day)
-	gifname=name+"_summary.gif"
-	mp4name=name+"_summary.mp4"
-	if (animation.find("g") != -1): ##make gif
-		status = "Assembling GIF. Please wait.      "
-		print(f'%s ' % status, end ="\r")
-		loop.run_until_complete(statusUpdate(status, color="white"))##TEST
-		with imageio.get_writer(gifname, format='GIF-PIL', mode='I', loop = 1, duration=frameDuration, subrectangles=True) as writer:
-			for filename in filenames:
-				image = imageio.imread(filename)
-				writer.append_data(image)
-	if (animation.find("m") != -1): ##make mp4
-		status = "Assembling mp4. Please wait.      "
-		print(f'%s ' % status, end ="\r")
-		loop.run_until_complete(statusUpdate(status, color="white"))##TEST
-		with imageio.get_writer(mp4name, fps=30) as writer2: #30 seems fine, right?
-			for filename in filenames:
-				image = imageio.imread(filename)
-				writer2.append_data(image)
-	status = "Cleaning  up files                "
-	print(f'%s ' % status, end ="\r")
-	loop.run_until_complete(statusUpdate(status, color="white"))##TEST
-	for filename in set(filenames[:-1]):##leave the last image so you have a png too!
-		os.remove(filename)
-	if daynum:
-		os.rename(filenames[len(filenames)-1],("day"+daynum+".png"))
-	print("Gif, MP4 and PNG complete! All done!")
-	status = "Charts Complete! All done!"
-	loop.run_until_complete(statusUpdate(status, color="lightgreen"))##TEST
-	loop.close()
-
-
-####
-## Typical argument amount checker and input check. 
-## Cannot confirm anything about folder path. 
-####
-def main(fitename, logfolder2, ani, loop, daynum=None):
-    global wipeRegExp,clearRegExp,startRegExp
-    if fitename not in fightarray:
-        print(f"Invalid fight name entered. \n\nSupported fight names are: {fightlist}\n")
-        sys.exit()
-    elif fitename in fightarray:
-        fightSelect(fitename,logfolder2, loop)
-    elif fitename in fightarray:
-        animation = ani.lower()
-    else:
-        print("Invalid arguments provided. Please enter fight name and log folder path.")
+    setRegex()
     
-###########
-## Regex checks for fight, wipe, and start of combat.
-###########    
+def setRegex():
+    global wipeRegExp,clearRegExp,startRegExp
     wipeRegExp = re.compile(r"33\|([0-9]*)-([0-9]*)-([0-9]*)T([0-9]*):([0-9]*):([0-9]*).*\|"+fightID+"\|40000005.*")
     clearRegExp = re.compile(r"33\|([0-9]*)-([0-9]*)-([0-9]*)T([0-9]*):([0-9]*):([0-9]*).*\|"+fightID+"\|40000003.*")
     startRegExp = re.compile(r"00\|([0-9]*)-([0-9]*)-([0-9]*)T([0-9]*):([0-9]*):([0-9]*).*\|0039\|\|Engage!\|.*")
-    setPhaseTracker()
+
+def update_logs(fp, logcol):
+    folder_path = fp
+    file_type = '\*log'
+    files = glob.glob(folder_path + file_type)
+    max_file = os.path.basename(max(files, key=os.path.getctime))
+    logfile=folder_path + "\\" + max_file
+
+##Copy to DSR folder
+    dest = logcol + "\\" + max_file
+    copy2(logfile, dest)
+
+
+def startApplication():
+
+    from tkinter import Label, Tk, Button, StringVar, IntVar, BooleanVar
+    from tkinter import filedialog
+    from tkinter import messagebox
+    from tkinter.ttk import Combobox
+    import customtkinter
+    from PIL import Image, ImageTk
+    import subprocess
+    import asyncio
+    from threading import Thread, Event
+    import warnings
+    import logging
+
+    logging.basicConfig(filename='application.log', level=logging.WARNING, format='%(asctime)s %(levelname)s: %(message)s')
+
+    class BaseGui:
+        global fightarray
+        fightarray = ["TEA","UWU","UCoB","DSU"]##to be updated/removed
+
+        def __init__( self, master ):
+            self.master = master
+            master.title('FFXIV Folder Parser!')
+            master.geometry("450x620+10+10")
+            master.resizable(width=False, height=False)
+            self.thread = None
+            self.stop_event = Event()
+            self.running = BooleanVar()
+            self.running.set(False)
+            self.final_status = BooleanVar()
+            self.final_status.set(False)
+            self.lock = threading.Lock()
+            self.logfolder3 = ""
+            self.animation = ""
+            self.fitename = ""
+            self.daynum = ""
+            ##Image section
+            self.bgimg = Image.open("images/background.png")
+            self.bgimg = self.bgimg.resize((450, 350))
+            self.render = ImageTk.PhotoImage(self.bgimg)
+            self.img = Label(root, image=self.render)
+            self.img.image = self.render
+            self.img.place(x=0, y=0)
+
+            ##Log folder section
+            self.fightLabel = Label(master=root,text="Select the folder your logs are in:")
+            self.fightLabel.place(x=20, y=365)
+            self.browseButton = customtkinter.CTkButton(root,text="Browse", command=self.browse_button)
+            self.browseButton.place(x=300, y=390)
+            self.folder_path = StringVar()
+            self.folderLabel = customtkinter.CTkLabel(master=root,textvariable=self.folder_path, fg_color="gray",width=250)
+            self.folderLabel.place(x=20, y=390)
+            ##Fight selection section
+            fightSelectLabel = Label(master,text="Choose the fight to parse:")
+            fightSelectLabel.place(x=20, y=475)
+            self.data=fightarray
+            self.fightsCombo=customtkinter.CTkComboBox(root, values=self.data)
+            self.fightsCombo.set("DSU")
+            self.fightsCombo.place(x=25, y=500)
+            ##Gif an animation section
+            self.aniLabel = customtkinter.CTkLabel(master=root,text="Do you want a gif or mp4? Optional.", text_color="black")
+            self.aniLabel.place(x=20, y=425)
+            self.gifVal = IntVar()
+            self.mp4Val = IntVar()
+            self.gifCheck = customtkinter.CTkCheckBox(root, text = "GIF", variable = self.gifVal, text_color="black")
+            self.mp4Check = customtkinter.CTkCheckBox(root, text = "MP4", variable = self.mp4Val, text_color="black")
+            self.gifCheck.place(x=20, y=450)
+            self.mp4Check.place(x=90, y=450)
+            ##Status updater section
+            self.statusTxt = StringVar(value="Awaiting user input. Press START when ready.")
+            self.statusClr = ""
+            self.statusClr = "white"
+            self.statuslabel = customtkinter.CTkLabel(master=root,textvariable=self.statusTxt,fg_color="gray", text_color=self.statusClr, width=350)
+            self.statuslabel.place(x=50, y=535)
+
+            ##Start button!
+            self.startBTN = customtkinter.CTkButton(root,text="START", command=self.start_parse)
+            self.startBTN.place(x=300, y=490)
+            
+            ##Prog Day section
+            self.daylabel = customtkinter.CTkLabel(master=root,text="Day: ", text_color="black",width=35)
+            self.daynumBox = customtkinter.CTkEntry(master=root, placeholder_text = "##", width = 50, text_color="white")
+            self.daylabel.place(x=350, y=450)
+            self.daynumBox.place(x=390, y=450)
+
+            ##ACT file section
+            self.fetchActLabel = customtkinter.CTkLabel(master=root,text="Do you want to add the latest log to your logfolder?", text_color="black")
+            self.fetchActLabel.place(x=20, y=565)
+            self.fetchACT = IntVar()
+            self.fetchACTStatus = StringVar(value="No")
+            self.fetchACTCb = customtkinter.CTkCheckBox(root, textvariable=self.fetchACTStatus, variable = self.fetchACT, text_color="black", command=self.toggle_act)
+            self.fetchACTCb.place(x=20, y=590)
+
+            self.actFolderLabel = Label(master=root,text="Select the folder your ACT writes to:")
+            self.actFolderLabel.place(x=20, y=620)
+            self.browseACT = customtkinter.CTkButton(root,text="Browse", command=self.browse_act)
+            self.browseACT.place(x=300, y=640)
+
+            self.act_folder_path = StringVar(value=str(os.path.expanduser("~"))+"\\AppData\Roaming\Advanced Combat Tracker\FFXIVLogs")
+            self.actLabel = customtkinter.CTkLabel(master=root, width=250,textvariable=self.act_folder_path,fg_color="gray",wraplength=250)
+            self.actLabel.place(x=20, y=640)
+
+
+        def browse_button(self):
+            filename = filedialog.askdirectory()
+            temp = filename.replace("/", "\\")
+            self.folder_path.set(str(temp))
+
+        def browse_act(self):
+            filename = filedialog.askdirectory(initialdir=str(os.path.expanduser("~"))+"\\AppData\Roaming\Advanced Combat Tracker\FFXIVLogs")
+            temp = filename.replace("/", "\\")
+            self.act_folder_path.set(str(temp))
+
+        def get_animation(self):
+            global animation
+            animation = "p"
+            if self.gifVal.get()==1:
+                animation += "g"
+            if self.mp4Val.get()==1:
+                animation += "m"
+            return animation
+
+        def get_fightname(self):
+            global fitename
+            fitename = ""
+            fitename = self.fightsCombo.get()
+        
+        def get_daynum(self):
+            daynum = ""
+            daynum = self.daynumBox.get()
+
+        def statusUpdate(self, upd=None):
+            self.statusTxt.set(status)
+            self.statusClr = str(statuscolor)
+            self.statuslabel.configure(text_color=str(self.statusClr)) 
+        def start_status_update(self):
+            self.statusUpdate()
+            self.final_status.set(False)
+            self.master.after(500, self.start_status_update)         
+
+        def final_status_update(self):
+            self.statusUpdate()
+            self.final_status.set(True)
+            
+        def close(self) :
+            logging.debug("Closing the application.")
+            self.master.quit()
+            
+        ##Starts the processing of the log data
+        ##Threads the heavy processing section
+        def start_parse(self):
+            global status,statuscolor
+            self.get_animation()
+            self.get_fightname()
+            self.get_daynum()
+            self.statusUpdate(self)
+            if self.folder_path.get()=="": 
+                status = "Missing LogFolder. Please ensure the log folder is found."
+                statuscolor = "red"
+                self.statusUpdate()
+                return
+            elif (self.fightsCombo.get() == ""): 
+                status = "Missing Fightname. Please ensure a fight is selected."
+                statuscolor = "red"
+                self.statusUpdate()
+                return
+            else: 
+                if (self.fetchACTCb.get()):
+                    update_logs(str(self.act_folder_path.get()),str(self.folder_path.get()))
+                fightSelect(self.fightsCombo.get(), self.folder_path.get())
+                self.statusUpdate()
+                day = (str(self.daynumBox.get()))
+                with self.lock:  # Acquire the lock before modifying the thread and running state
+                    if self.thread == None:
+                        self.thread = Thread(target=self.begin, args=(day,))
+                        self.thread.start()
+                        self.running.set(True)
+                        self.master.after(100, self.check_thread_completion)
+                    else:
+                        self.thread = None
+                        status = "Please press START when ready."
+                        statuscolor = "White"
+                return
+        def check_thread_completion(self):
+            if self.thread and self.thread.is_alive():
+                self.master.after(100, self.check_thread_completion)  # Check again after 100ms
+            else:
+                self.running.set(False)
+            
+        def thread_completed(self):
+            self.statusUpdate()
+            self.thread.join()
+            #print("Thread completed.")
+
+                
+        def begin(self, day):
+            self.running.set(True)
+            parseFolder(day)
+        ##Toggles the ACT section of the gui
+        def toggle_act(self):
+           if self.fetchACT.get():
+                self.actFolderLabel.place(x=20, y=620)
+                self.browseACT.place(x=300, y=640)
+                self.actLabel.place(x=20, y=640)
+                self.fetchACTStatus.set("Yes")
+                self.master.geometry("450x680+10+10")
+           else: 
+                self.actFolderLabel.pack_forget()
+                self.browseACT.pack_forget()
+                self.actLabel.pack_forget()
+                self.fetchACTStatus.set("No")
+                self.master.geometry("450x620+10+10") 
+
+
+    root = Tk() 
+    gui = BaseGui(root)
+    gui.start_status_update()
+    root.protocol( "WM_DELETE_WINDOW", gui.close )
+    root.mainloop()
+if __name__ == "__main__": 
     try:
-        import Latest_file_grab
-    except ImportError:
-        pass
-    
-    return parseFolder(loop,daynum)
-    
-from tkinter import *
-from tkinter import filedialog
-from tkinter import messagebox
-from tkinter.ttk import Combobox
-import customtkinter
-from PIL import Image, ImageTk
-import subprocess
-import asyncio
-from threading import Thread
-
-window=Tk()
-window.resizable(width=False, height=False)
-
-global logfolder3,ani,fitename,daynum,loop
-
-def browse_button():
-    global folder_path, logfolder3, logfolder
-    filename = filedialog.askdirectory()
-    temp = filename.replace("/", "\\")
-    folder_path.set(str(temp))
-    logfolder3 = temp
-
-def get_animation():
-    global animation
-    animation = "p"
-    if v2.get()==1:
-        animation += "g"
-    if v3.get()==1:
-        animation += "m"
-
-def get_fightname():
-    global fitename
-    fitename = ""
-    fitename = cb.get()
-    
-def get_daynum():
-    global daynum
-    daynum = ""
-    daynum = daynumBox.get()
-
-def graceful_end():
-    global loop
-    #if loop:
-    #    loop.close()
-    window.destroy()
-
-async def statusUpdate(status, color=None):
-    window.update()
-    if color:
-        tcolor = color
-    else:
-        color = "white"
-    statuslabel.configure(text=status, text_color=color)
-
-def start_parse():
-    global logfolder3,fitename,animation,daynum, loop
-    get_animation()
-    get_fightname()
-    get_daynum()
-    loop = asyncio.get_event_loop()
-    if (logfolder3 == ""): 
-        status = "Missing LogFolder. Please ensure the log folder is found."
-        loop.run_until_complete(statusUpdate(status, color="red"))##TEST
-        return
-    if (fitename == ""): 
-        status = "Missing Fightname. Please ensure a fight is selected."
-        loop.run_until_complete(statusUpdate(status, color="red"))##TEST
-        return
-    t1 = Thread(target=main, args=(fitename, logfolder3, animation, loop, daynum))
-    c = t1.start()
-    if c == "0":
-        status = "Fight not found in folder."
-        loop.run_until_complete(statusUpdate(status, color="red"))##TEST
-    else: 
-        status = "Job Complete!"
-global logfolder3,ani,fitename
-logfolder3 = ""
-animation = ""
-fitename = ""
-
-fightSelectLabel = Label(master=window,text="Choose the fight to parse:")
-fightSelectLabel.place(x=20, y=460)
-
-bgimg = Image.open("images/sample.png")
-bgimg = bgimg.resize((450, 350))
-render = ImageTk.PhotoImage(bgimg)
-img = Label(window, image=render)
-img.image = render
-img.place(x=0, y=0)
-
-data=fightarray
-cb=customtkinter.CTkComboBox(window, values=data)
-cb.set("DSU")
-cb.place(x=25, y=485)
-
-lbl3 = customtkinter.CTkLabel(master=window,text="Do you want a gif or mp4? Optional.", text_color="black")
-lbl3.place(x=20, y=415)
-v2 = IntVar()
-v3 = IntVar()
-C2 = customtkinter.CTkCheckBox(window, text = "GIF", variable = v2, text_color="black")
-C3 = customtkinter.CTkCheckBox(window, text = "MP4", variable = v3, text_color="black")
-C2.place(x=20, y=440)
-C3.place(x=90, y=440)
-
-folder_path = StringVar()
-lbl3 = customtkinter.CTkLabel(master=window,textvariable=folder_path, fg_color="gray",width=250)
-lbl3.place(x=20, y=390)
-
-status = "Awaiting user input. Press START when ready."
-
-statuslabel = customtkinter.CTkLabel(master=window,text=status,fg_color="gray", width=350)
-statuslabel.place(x=50, y=525)
-
-lbl1 = Label(master=window,text="Select the folder your logs are in:")
-lbl1.place(x=20, y=365)
-button2 = customtkinter.CTkButton(window,text="Browse", command=browse_button)
-button2.place(x=300, y=390)
-
-startBTN = customtkinter.CTkButton(window,text="START", command=start_parse)
-startBTN.place(x=300, y=480)
-
-daylabel = customtkinter.CTkLabel(master=window,text="Day: ", text_color="black",width=35)
-
-daynumBox = customtkinter.CTkEntry(master=window, placeholder_text = "##", width = 50, text_color="white")
-daylabel.place(x=350, y=440)
-daynumBox.place(x=390, y=440)
-
-window.protocol("WM_DELETE_WINDOW", graceful_end)
-
-window.title('FFXIV Folder Parser!')
-window.geometry("450x565+10+10")
-window.mainloop()
+        startApplication()
+    except Exception as e:
+        logging.exception("An error occurred")
+        raise

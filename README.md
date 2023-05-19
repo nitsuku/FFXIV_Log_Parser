@@ -4,9 +4,12 @@
 ## Install
 
 ```sh
-sudo apt install git python3
-git clone https://github.com/nitsuku/FFXIV_Log_Parser.git
-cd Log_Parser
+sudo apt install git python3 or https://www.python.org/downloads/windows/
+git clone https://github.com/nitsuku/FFXIV_Log_Parser.git or Code button and DownloadZIP.
+    If you downloaded the Zip, extract it to a location you want to use.
+    Open either CMD or Powershell
+    cd to the location of the folder you extracted
+cd Log_Parser  or open the folder you want to use
 python3 -m pip install -r requirements.txt
 python3 Log_Parser.py
 ```

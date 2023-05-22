@@ -32,7 +32,6 @@ phaseClears = [] ##Track the clear time of each phase and calc the averages late
 ###########
 def doorbossDown(fightID, line):
 	global check
-	check = False
 	if (fightID == "8003759C"): #p4s
 		doorquote = "Hesperos|Do not believe victory yours... I can yet shed this"
 		enterquote = "Asphodelos: The Fourth Circle (Savage) has begun"
@@ -109,13 +108,10 @@ def parseLog(logFile, dict):
 				if(doorbossdead): #if doorboss was defeated, add phase0 time to the counter.
 					if (not fd):
 						dict[startTime] = (duration+.5,clear,doorbossdead,firstClear) #may need to increase .5 if our dps gets any stronger in this phase or everyone pots.
-					#	addToPhaseTracker(getPhase(duration+.5), duration+.5)
 					else:
 						dict[startTime] = (duration+phases[0],clear,doorbossdead,firstClear)
-					#	addToPhaseTracker(getPhase(duration+phases[0]), duration+phases[0])
 				else: #otherwise add normal time counting.
 					dict[startTime] = (duration,clear,doorbossdead,firstClear)
-					#addToPhaseTracker(getPhase(duration), duration)
 				startTime = datetime.datetime(9999,12,31)
 				endTime = datetime.datetime(1,1,1)
 
@@ -129,18 +125,15 @@ def getPhase(time):
 			return i
 	return 0
  
-
 def parseFolder(daynum=None):
 	dict = SortedDict() #will store fight data for each pull/event.
 	global animation #var checking if you want a gif or mp4
 	global flip #shit var that I now need.
-	global status, statuscolor
-	status = "Parsing Loggies!"
 	flip = True #ihateyou.gif
+	global status, statuscolor
 	i = 1
 	totalFiles = len(os.listdir(logFolder))
 	for filename in os.listdir(logFolder):#Lets parse some loggies!
-		print(f'File %i of {totalFiles}' % i, end="\r")
 		status = (f'Parsing %i of {totalFiles} logs. Please wait.' % i)
 		statuscolor = "Blue"
 		i += 1
@@ -162,13 +155,7 @@ def parseFolder(daynum=None):
 	## Setting up gif duration bits here.
 	rampUpIdx = len(dict)
 	rampDownIdx = 0
-	#frameDuration = gifTime/len(dict)
-	try:
-		frameDuration = gifTime / len(dict)
-	except ZeroDivisionError:
-		status = "No fight match found."
-		statuscolor = "red"
-		return
+	frameDuration = gifTime/len(dict)
 	frameStep = 1
 	if frameDuration < minFrameDuration:
 		frameDuration = minFrameDuration
@@ -176,8 +163,9 @@ def parseFolder(daynum=None):
 		rampDownIdx = rampDownTime/frameDuration
 		frameStep = (len(dict) - rampUpIdx - rampDownIdx) / ((gifTime - rampUpTime - rampDownTime) / frameDuration)
 	status = "Creating PNG graphs!              "
-	statuscolor = "White"
 	#print(f'%s ' % status, end ="\r")		
+	status = "Creating PNG graphs!              "
+	statuscolor = "White"
     ####
     ## This iterates through the entire dict of data and will create a png frame for each pull (wipe or clear)
     ####
@@ -191,7 +179,6 @@ def parseFolder(daynum=None):
 			elif not (dict.peekitem(j)[1][2]):
 				plt.plot(j, dict.peekitem(j)[1][0], color='yellow', marker='*', markeredgecolor='gray', markersize=10)
 		else: #if the pull was not a clear, mark with a blue dot.
-			#plt.plot(j, dict.peekitem(j)[1][0], color=phaseColors[phaseNum], marker='o', markersize=5)##Use phase colors for dots. Not sure if i want to add other color options here.
 			plt.plot(j, dict.peekitem(j)[1][0], color='blue', marker='o', markersize=5) ##just blue dots
 		if (dict.peekitem(j)[1][2]):
 			t += datetime.timedelta(seconds=(int(dict.peekitem(j)[1][0]-int(float(phases[0])))*60)) ## Double check me
@@ -210,45 +197,26 @@ def parseFolder(daynum=None):
 		patches = []
 		counted = False
         ## Make the legend for each frame. I'm sorry about the logic here
-		# for iPatch in range(len(phases)):
-			# if(flip and not dict.peekitem(j)[1][3]):
-				# flip = False #If flip is true, firstClear is just triggered. Swap it.
-			# elif (not flip and dict.peekitem(j)[1][3]):
-				# flip = True #if firstClear is not triggered, flip needs to be re-enabled.
-			# if(not flip and not dict.peekitem(j)[1][3]):
-				# iPatch = iPatch+1 #if flip and firstClear are triggered, you need to add to the next phase.
-			# if (not counted and dict.peekitem(j)[1][0] < phases[iPatch]): #finally we can do something here
-				# counted = True #this patch is being processes
-				# if (dict.peekitem(j)[1][2]): #doorbossdead 
-					# if (dict.peekitem(j)[1][3]): #firstClear
-						# wipecount[iPatch] += 1 
-					# else: #not firstClear
-						# wipecount[iPatch] += 1
-				# else: #No doorbossdead, act normal <_<   >_>
-					# wipecount[iPatch] += 1
-			# if(not flip and not dict.peekitem(j)[1][3]):
-				# iPatch = iPatch-1 #undo our modification here so logic flows normal.
-
-			# patches += [mpatches.Patch(color=phaseColors[iPatch], label=(phaseNames[iPatch]) + f": {wipecount[iPatch]}")]
 		for iPatch in range(len(phases)):
-			item = dict.peekitem(j)[1]
-			firstClear = item[3]
-    
-			if flip != firstClear:
-				flip = firstClear
-				if not firstClear:
-					iPatch += 1
-			elif not counted and item[0] < phases[iPatch]:
-				counted = True
-				if item[2]:  # doorbossdead
+			if(flip and not dict.peekitem(j)[1][3]):
+				flip = False #If flip is true, firstClear is just triggered. Swap it.
+			elif (not flip and dict.peekitem(j)[1][3]):
+				flip = True #if firstClear is not triggered, flip needs to be re-enabled.
+			if(not flip and not dict.peekitem(j)[1][3]):
+				iPatch = iPatch+1 #if flip and firstClear are triggered, you need to add to the next phase.
+			if (not counted and dict.peekitem(j)[1][0] < phases[iPatch]): #finally we can do something here
+				counted = True #this patch is being processes
+				if (dict.peekitem(j)[1][2]): #doorbossdead 
+					if (dict.peekitem(j)[1][3]): #firstClear
+						wipecount[iPatch] += 1 
+					else: #not firstClear
+						wipecount[iPatch] += 1
+				else: #No doorbossdead, act normal <_<   >_>
 					wipecount[iPatch] += 1
-				else:
-					wipecount[iPatch] += 1
-			if not flip and not firstClear:
-				iPatch -= 1
-    
-			patches.append(mpatches.Patch(color=phaseColors[iPatch], label=phaseNames[iPatch] + f": {wipecount[iPatch]}"))
+			if(not flip and not dict.peekitem(j)[1][3]):
+				iPatch = iPatch-1 #undo our modification here so logic flows normal.
 
+			patches += [mpatches.Patch(color=phaseColors[iPatch], label=(phaseNames[iPatch]) + f": {wipecount[iPatch]}")]
 		plt.legend(handles=patches, loc="upper left")
 		
 		# create file name and append it to a list
@@ -268,29 +236,27 @@ def parseFolder(daynum=None):
 	if (animation.find("g") != -1): ##make gif
 		status = "Assembling GIF. Please wait.      "
 		statuscolor="Blue"
-		#print(f'%s ' % status, end ="\r")
 		with imageio.get_writer(gifname, format='GIF-PIL', mode='I', loop = 1, duration=frameDuration, subrectangles=True) as writer:
 			for filename in filenames:
 				image = imageio.imread(filename)
 				writer.append_data(image)
 	if (animation.find("m") != -1): ##make mp4
-		status = "Assembling mp4. Please wait.      "
+		status = "Assembling MP4. Please wait.      "
 		statuscolor="Blue"
-		#print(f'%s ' % status, end ="\r")
 		with imageio.get_writer(mp4name, fps=30) as writer2: #30 seems fine, right?
 			for filename in filenames:
 				image = imageio.imread(filename)
 				writer2.append_data(image)
 	status = "Cleaning  up files                "
-	#print(f'%s ' % status, end ="\r")
+	statuscolor = "White"
 	for filename in set(filenames[:-1]):##leave the last image so you have a png too!
 		os.remove(filename)
 	if daynum:
 		os.rename(filenames[len(filenames)-1],("day"+daynum+".png"))
-	#print("Gif, MP4 and PNG complete! All done!")
 	status = "Graphs complete! Check the folder for results"
 	statuscolor = "lightgreen"
 	return 
+
     
 def fightSelect(fightName, logLoc) :#, loop) :
     global fightTitle
@@ -325,7 +291,7 @@ def fightSelect(fightName, logLoc) :#, loop) :
     elif (fightName == "DSU"):
         fightID = "8003759A"##UPDATE ME
         phaseColors = ['b','r','y','c','b','r','gold']
-        phases = [2.9,6.3,8.4,10.8,13.8,16.8,21.2]
+        phases = [2.9,6.3,8.4,10.8,14.3,16.8,21.2]
         phaseNames = ["Adelphel","Thordan","Nidhogg","Eyes","Thordan2","NidhoggHrae","DragonKing"]
         transitions = ["of the archbishop", "defeats King Thordan", "defeats Nidhogg", "undone by mortal", "defeats King Thordan", "defeats y", "\|40000003"]
     elif (fightName == "P4S"):

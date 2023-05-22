@@ -1,0 +1,7 @@
+1) Add logic to compare log lines to identify phase transitions
+  a. Would need to snip the time at that point and use that in calculations, store it and use that for later phase calculations to accurately get later phases.
+  b. Later phase issues is what hold this back right now, need to think about how to write it without it making the code base worse.
+2) Extend support for the fights that I have done.
+3) Put in some updater functionality? 
+  a. Not sure how to go about doing this, new to me
+4)  Break up logic to get a cleaner code base

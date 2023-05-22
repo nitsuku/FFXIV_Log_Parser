@@ -5,3 +5,5 @@
 3) Put in some updater functionality? 
   a. Not sure how to go about doing this, new to me
 4)  Break up logic to get a cleaner code base
+5)  Fix issues with requirements.txt installation. Able to install on my env from that but others have had issues.
+  a. Package together as an exe? Unsure if python allows this functionality.

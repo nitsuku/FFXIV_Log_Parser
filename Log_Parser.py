@@ -498,12 +498,12 @@ def startApplication():
             ##NEW HERE
             
             # Add a button for update check
-            self.update_button = customtkinter.CTkButton(root, text="Update")
+            self.update_button = customtkinter.CTkButton(root, text="Update", corner_radius=0)
             self.update_button.place(x=20, y=20)
 
             # Add a button for update check
-            self.refresh_update_button = customtkinter.CTkButton(root, text="↻", command=self.check_for_updates, width=20)
-            self.refresh_update_button.place(x=400, y=20)
+            #self.refresh_update_button = customtkinter.CTkButton(root, text="Check for Update ↻", command=self.check_for_updates, corner_radius=0)
+            #self.refresh_update_button.place(x=315, y=20)
 
             # Initially, hide the update button
             self.update_button.place_forget()
@@ -511,15 +511,23 @@ def startApplication():
             
         def check_for_updates(self):
             update_available = self.is_update_available()
+            global status, statuscolor
+
 
             if update_available:
                 self.update_button.configure(text="Update Available",command=self.update_script_from_git)
                 self.update_button.place(x=20, y=20)  # Show the button when there's an update
-                self.refresh_update_button.place_forget()
+                #self.refresh_update_button.place_forget()
+                status="Update Available"
+                statuscolor = "Blue"
+                self.statusUpdate()
             else:
-                self.update_button.configure(text="No update available.")  # Display a message if no update available
+                #self.update_button.configure(text="No update available.")  # Display a message if no update available
                 self.update_button.place_forget()  # Hide the button if no update available
-                self.refresh_update_button.place(x=400, y=20)
+                #self.refresh_update_button.place(x=315, y=20)
+                status="Script already up to date!"
+                statuscolor = "lightgreen"
+                self.statusUpdate()
 
 
         def is_update_available(self):
@@ -546,10 +554,18 @@ def startApplication():
                 return False
                 
         def update_script_from_git(self):
+            global status, statuscolor
             try:
                 # Fetch the updated content from the repository
                 raw_url = "https://raw.githubusercontent.com/nitsuku/FFXIV_Log_Parser/main/Log_Parser.py"
-                response = requests.get(raw_url)
+                timestamp = int(time.time())
+                url_with_timestamp = f"{raw_url}?timestamp={timestamp}"
+                headers = {
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache',
+                    'Expires': '0',
+                }
+                response = requests.get(url_with_timestamp, headers=headers)
                 response.raise_for_status()  # Raise an exception for bad responses (e.g., 404 Not Found)
 
                 # Get the local file path
@@ -561,7 +577,10 @@ def startApplication():
 
                 # Check if the content is different
                 if local_content == response.text:
-                    print("Your script is already up to date.")
+                    #print("Your script is already up to date.")
+                    status="Script already up to date!"
+                    statuscolor = "lightgreen"
+                    self.statusUpdate()
                     return
                 # Ask for user confirmation
                 answer = messagebox.askquestion("Update Available", "Your branch is behind. Do you want to update?\nCurrent Version: " +local_content.splitlines()[0].split(":")[1] + "\nNew Version: "+ response.text.splitlines()[0].split(":")[1])
@@ -570,11 +589,15 @@ def startApplication():
                     # Write the updated content to the local file
                     with open(local_file_path, 'w', encoding='utf-8') as local_file:
                         local_file.write(response.text)
-                    print("Script updated successfully.")
+                    status="Script updated successfully."
+                    statuscolor = "lightgreen"
+                    self.statusUpdate()
                 else:
-                    print("Script update canceled.")
+                    status="Script update canceled."
+                    statuscolor="Blue"
+                    self.statusUpdate()
                     self.update_button.place_forget()  # Hide the button if no
-                    self.refresh_update_button.place(x=400, y=20)
+                    #self.refresh_update_button.place(x=315, y=20)
 
 
 

@@ -1,3 +1,5 @@
+##Version:1.12
+
 import threading
 import re
 import datetime
@@ -99,6 +101,7 @@ def parseLog(logFile, dict):
             ##If doorboss just died, dont scuff the timer since it is through the phase anyway.
 			if line.find("In pursuit of the archbishop") != -1:#literally just for DSR. Forgiveness trigger for doorboss kill.
 				fd = False
+                
 			if check: #If the checkpoint was hit, firstClear flips its value
 				firstClear = not firstClear
 			else: #room reset, default our firstClear
@@ -179,7 +182,11 @@ def parseFolder(daynum=None):
 			elif not (dict.peekitem(j)[1][2]):
 				plt.plot(j, dict.peekitem(j)[1][0], color='yellow', marker='*', markeredgecolor='gray', markersize=10)
 		else: #if the pull was not a clear, mark with a blue dot.
-			plt.plot(j, dict.peekitem(j)[1][0], color='blue', marker='o', markersize=5) ##just blue dots
+			if (j > 1618):
+				plt.plot(j, dict.peekitem(j)[1][0], color='red', marker='o', markersize=5) ##just blue dots
+			else:
+				plt.plot(j, dict.peekitem(j)[1][0], color='blue', marker='o', markersize=5) ##just blue dots
+		#plt.plot(j, dict.peekitem(j)[1][0], color='blue', marker='o', markersize=5) ##just blue dots
 		if (dict.peekitem(j)[1][2]):
 			t += datetime.timedelta(seconds=(int(dict.peekitem(j)[1][0]-int(float(phases[0])))*60)) ## Double check me
 		else:
@@ -221,10 +228,12 @@ def parseFolder(daynum=None):
 		
 		# create file name and append it to a list
 		if j < rampUpIdx or j > (len(dict) - rampDownIdx) or (j - rampUpIdx)%int(frameStep) == 0:
-			filename = f'{j}.png'
-			filenames.append(filename)
+			if (((animation.find("g") != -1) or (animation.find("m") != -1)) or (j == len(dict)-1)):
+				status = (f'Graphing pull %i of {len(dict)-1} logs. Please wait.' % j)
+				filename = f'{j}.png'
+				filenames.append(filename)
 			# save frame
-			plt.savefig(filename)
+				plt.savefig(filename)
 		
 	# build gif
     ##just let this be, it will give you an aspect warning, but every solution I try
@@ -291,9 +300,15 @@ def fightSelect(fightName, logLoc) :#, loop) :
     elif (fightName == "DSU"):
         fightID = "8003759A"##UPDATE ME
         phaseColors = ['b','r','y','c','b','r','gold']
-        phases = [2.9,6.3,8.4,10.8,14.3,16.8,21.2]
+        phases = [2.9,6.3,8.4,10.8,14.3,17.2,22]
+        #phases = [2.74,6,8,10.35,13.1,15.75,20.12]
         phaseNames = ["Adelphel","Thordan","Nidhogg","Eyes","Thordan2","NidhoggHrae","DragonKing"]
-        transitions = ["of the archbishop", "defeats King Thordan", "defeats Nidhogg", "undone by mortal", "defeats King Thordan", "defeats y", "\|40000003"]
+        transitions = ["of the archbishop", "Though she emerged victorious", "I would ask one last favor", "you are unharmed?", "Undone by mortal will", "I am become a god eternal", "defeats Dragon-king"]
+    elif (fightName == "TOP"):
+        fightID = "800375AC"##UPDATE ME
+        phaseColors = ['b','r','y','c','m','g']
+        phases = [2.17,4.55,7.35,8.3,13.07,17.59]
+        phaseNames = ["Omega", "Omega-MF", "Omega-Recon", "Blue Screen", "Dynamis", "Alpha Omega"]
     elif (fightName == "P4S"):
         fightID = "8003759C"
         phaseColors = ['b','r']
@@ -391,12 +406,13 @@ def startApplication():
     from threading import Thread, Event
     import warnings
     import logging
+    import difflib
 
     logging.basicConfig(filename='application.log', level=logging.WARNING, format='%(asctime)s %(levelname)s: %(message)s')
 
     class BaseGui:
         global fightarray
-        fightarray = ["TEA","UWU","UCoB","DSU"]##to be updated/removed
+        fightarray = ["TEA","UWU","UCoB","DSU","TOP"]##to be updated/removed
 
         def __init__( self, master ):
             self.master = master
@@ -435,7 +451,7 @@ def startApplication():
             fightSelectLabel.place(x=20, y=475)
             self.data=fightarray
             self.fightsCombo=customtkinter.CTkComboBox(root, values=self.data)
-            self.fightsCombo.set("DSU")
+            self.fightsCombo.set("TOP") ##DEFAULT APPEARANCE. Change if you are progging just one fight for ease.
             self.fightsCombo.place(x=25, y=500)
             ##Gif an animation section
             self.aniLabel = customtkinter.CTkLabel(master=root,text="Do you want a gif or mp4? Optional.", text_color="black")
@@ -479,7 +495,63 @@ def startApplication():
             self.act_folder_path = StringVar(value=str(os.path.expanduser("~"))+"\\AppData\Roaming\Advanced Combat Tracker\FFXIVLogs")
             self.actLabel = customtkinter.CTkLabel(master=root, width=250,textvariable=self.act_folder_path,fg_color="gray",wraplength=250)
             self.actLabel.place(x=20, y=640)
+            ##NEW HERE
+            # Add a button for update check
+            self.update_button = customtkinter.CTkButton(root, text="Check for Updates", command=self.check_for_updates)
+            self.update_button.place(x=20, y=590)
 
+            # Add a status line
+            self.status_line = customtkinter.CTkLabel(master=root, text="", fg_color="black")
+            self.status_line.place(x=20, y=620)
+            
+            
+        def check_for_updates(self):
+            repo_url = "https://github.com/nitsuku/FFXIV_Log_Parser.git"
+            update_available = self.is_update_available(repo_url)
+
+            if update_available:
+                self.update_status_line("Update Available")
+            else:
+                self.status_line.config(text="")  # Hide the status line if no update available
+
+
+
+        def is_update_available(self, repo_url):
+            try:
+                remote_file_url = f"{repo_url.rstrip('/')}/blob/main/Log_Parser.py"
+
+                # Fetch the first line of the remote file
+                remote_first_line = subprocess.run(['curl', '-s', remote_file_url], capture_output=True, text=True).stdout.splitlines()[0]
+
+                # Extract version information using regex
+                remote_version_match = re.match(r'##Version:(\d+\.\d+)', remote_first_line)
+                if remote_version_match:
+                    remote_version = remote_version_match.group(1)
+                else:
+                    raise RuntimeError("Unable to retrieve remote version information.")
+
+                # Read the first line of the local file
+                local_file_path = os.path.realpath(__file__)  # Assuming the script is in the same directory
+                with open(local_file_path, 'r', encoding='utf-8') as local_file:
+                    local_first_line = local_file.readline()
+
+                # Extract version information from the local file
+                local_version_match = re.match(r'##Version:(\d+\.\d+)', local_first_line)
+                if local_version_match:
+                    local_version = local_version_match.group(1)
+                else:
+                    raise RuntimeError("Unable to retrieve local version information.")
+
+                # Compare the versions
+                return float(remote_version) > float(local_version)
+
+            except Exception as e:
+                self.update_status_line(f"An error occurred: {e}")
+                return False
+                
+        def update_status_line(self, message):
+            self.status_line.configure(text=f"Status: {message}")
+            ##End NEW
 
         def browse_button(self):
             filename = filedialog.askdirectory()
@@ -603,3 +675,4 @@ if __name__ == "__main__":
     except Exception as e:
         logging.exception("An error occurred")
         raise
+        

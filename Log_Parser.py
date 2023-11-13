@@ -1,4 +1,4 @@
-##Version:12
+##Version:11
 
 import threading
 import re
@@ -407,7 +407,7 @@ def startApplication():
     import warnings
     import logging
     import difflib
-
+    import requests
     logging.basicConfig(filename='application.log', level=logging.WARNING, format='%(asctime)s %(levelname)s: %(message)s')
 
     class BaseGui:
@@ -496,61 +496,91 @@ def startApplication():
             self.actLabel = customtkinter.CTkLabel(master=root, width=250,textvariable=self.act_folder_path,fg_color="gray",wraplength=250)
             self.actLabel.place(x=20, y=640)
             ##NEW HERE
+            
             # Add a button for update check
-            self.update_button = customtkinter.CTkButton(root, text="Check for Updates", command=self.check_for_updates)
-            self.update_button.place(x=20, y=590)
+            self.update_button = customtkinter.CTkButton(root, text="Update")
+            self.update_button.place(x=20, y=20)
 
-            # Add a status line
-            self.status_line = customtkinter.CTkLabel(master=root, text="", fg_color="black")
-            self.status_line.place(x=20, y=620)
+            # Add a button for update check
+            self.refresh_update_button = customtkinter.CTkButton(root, text="↻", command=self.check_for_updates, width=20)
+            self.refresh_update_button.place(x=400, y=20)
+
+            # Initially, hide the update button
+            self.update_button.place_forget()
             
             
         def check_for_updates(self):
-            repo_url = "https://github.com/nitsuku/FFXIV_Log_Parser.git"
-            update_available = self.is_update_available(repo_url)
+            update_available = self.is_update_available()
 
             if update_available:
-                self.update_status_line("Update Available")
+                self.update_button.configure(text="Update Available",command=self.update_script_from_git)
+                self.update_button.place(x=20, y=20)  # Show the button when there's an update
+                self.refresh_update_button.place_forget()
             else:
-                self.status_line.config(text="")  # Hide the status line if no update available
+                self.update_button.configure(text="No update available.")  # Display a message if no update available
+                self.update_button.place_forget()  # Hide the button if no update available
+                self.refresh_update_button.place(x=400, y=20)
 
 
-
-        def is_update_available(self, repo_url):
+        def is_update_available(self):
             try:
-                remote_file_url = f"{repo_url.rstrip('/')}/blob/main/Log_Parser.py"
+                remote_file_url = "https://raw.githubusercontent.com/nitsuku/FFXIV_Log_Parser/main/Log_Parser.py"
 
                 # Fetch the first line of the remote file
                 remote_first_line = subprocess.run(['curl', '-s', remote_file_url], capture_output=True, text=True).stdout.splitlines()[0]
-
-                # Extract version information using regex
-                remote_version_match = re.match(r'##Version:(\d+\.\d+)', remote_first_line)
-                if remote_version_match:
-                    remote_version = remote_version_match.group(1)
-                else:
-                    raise RuntimeError("Unable to retrieve remote version information.")
-
+                remote_ver = int(str(remote_first_line).split(":")[1])
                 # Read the first line of the local file
+                local_ver = 0
                 local_file_path = os.path.realpath(__file__)  # Assuming the script is in the same directory
                 with open(local_file_path, 'r', encoding='utf-8') as local_file:
                     local_first_line = local_file.readline()
-
-                # Extract version information from the local file
-                local_version_match = re.match(r'##Version:(\d+\.\d+)', local_first_line)
-                if local_version_match:
-                    local_version = local_version_match.group(1)
-                else:
-                    raise RuntimeError("Unable to retrieve local version information.")
-
+                    local_ver = int(str(local_first_line).split(":")[1])
                 # Compare the versions
-                return float(remote_version) > float(local_version)
+                if remote_ver > local_ver:
+                    return True
+                else:
+                    return False
 
             except Exception as e:
                 self.update_status_line(f"An error occurred: {e}")
                 return False
                 
-        def update_status_line(self, message):
-            self.status_line.configure(text=f"Status: {message}")
+        def update_script_from_git(self):
+            try:
+                # Fetch the updated content from the repository
+                raw_url = "https://raw.githubusercontent.com/nitsuku/FFXIV_Log_Parser/main/Log_Parser.py"
+                response = requests.get(raw_url)
+                response.raise_for_status()  # Raise an exception for bad responses (e.g., 404 Not Found)
+
+                # Get the local file path
+                local_file_path = os.path.realpath(__file__)  # Assuming the script is in the same directory
+
+                # Read the current local content
+                with open(local_file_path, 'r', encoding='utf-8') as local_file:
+                    local_content = local_file.read()
+
+                # Check if the content is different
+                if local_content == response.text:
+                    print("Your script is already up to date.")
+                    return
+                # Ask for user confirmation
+                answer = messagebox.askquestion("Update Available", "Your branch is behind. Do you want to update?\nCurrent Version: " +local_content.splitlines()[0].split(":")[1] + "\nNew Version: "+ response.text.splitlines()[0].split(":")[1])
+
+                if answer == 'yes':
+                    # Write the updated content to the local file
+                    with open(local_file_path, 'w', encoding='utf-8') as local_file:
+                        local_file.write(response.text)
+                    print("Script updated successfully.")
+                else:
+                    print("Script update canceled.")
+                    self.update_button.place_forget()  # Hide the button if no
+                    self.refresh_update_button.place(x=400, y=20)
+
+
+
+            except requests.exceptions.RequestException as e:
+                print(f"Failed to update script. An error occurred: {e}")
+                
             ##End NEW
 
         def browse_button(self):
@@ -667,6 +697,7 @@ def startApplication():
     root = Tk() 
     gui = BaseGui(root)
     gui.start_status_update()
+    gui.check_for_updates()
     root.protocol( "WM_DELETE_WINDOW", gui.close )
     root.mainloop()
 if __name__ == "__main__": 
